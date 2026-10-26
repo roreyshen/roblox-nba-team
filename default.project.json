@@ -8,7 +8,8 @@
       "Remotes": {
         "$className": "Folder",
         "Action": { "$className": "RemoteFunction" },
-        "GetLeaderboard": { "$className": "RemoteFunction" }
+        "GetLeaderboard": { "$className": "RemoteFunction" },
+        "Push": { "$className": "RemoteEvent" }
       }
     },
 

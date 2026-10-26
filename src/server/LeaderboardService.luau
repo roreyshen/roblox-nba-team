@@ -1,29 +1,34 @@
--- Global "best team rating" leaderboard (OrderedDataStore), cached and refreshed every minute.
--- Falls back to players in this server if DataStores are unavailable.
+-- Global leaderboards (OrderedDataStore), cached and refreshed every minute:
+--   best = highest team rating ever drafted, duel = total duel wins.
+-- Players in this server are always merged in, so the board works even without DataStores.
 
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
 
 local LeaderboardService = {}
 
-export type Entry = { userId: number, name: string, ovr: number }
+export type Entry = { userId: number, name: string, value: number }
 
 local TOP_N = 10
 local REFRESH_SECONDS = 60
 
-local ordered: OrderedDataStore? = nil
-do
-	local ok, result = pcall(function()
-		return DataStoreService:GetOrderedDataStore("BestOVR_v1")
+local BOARDS = {
+	best = { storeName = "BestOVR_v1", field = "BestOVR" },
+	duel = { storeName = "DuelWins_v1", field = "DuelWins" },
+}
+
+type Board = { store: OrderedDataStore?, cache: { Entry }, field: string }
+
+local boards: { [string]: Board } = {}
+for id, def in BOARDS do
+	local ok, store = pcall(function()
+		return DataStoreService:GetOrderedDataStore(def.storeName)
 	end)
-	if ok then
-		ordered = result
-	end
+	boards[id] = { store = if ok then store else nil, cache = {}, field = def.field }
 end
 
-local cache: { Entry } = {}
 local nameCache: { [number]: string } = {}
-local getOnlineBests: () -> { Entry } = function()
+local getOnlineProfiles: () -> { [Player]: { [string]: any } } = function()
 	return {}
 end
 
@@ -42,21 +47,22 @@ end
 local function upsert(list: { Entry }, entry: Entry)
 	for _, e in list do
 		if e.userId == entry.userId then
-			if entry.ovr > e.ovr then
-				e.ovr = entry.ovr
+			if entry.value > e.value then
+				e.value = entry.value
 			end
 			return
 		end
 	end
-	table.insert(list, { userId = entry.userId, name = entry.name, ovr = entry.ovr })
+	table.insert(list, { userId = entry.userId, name = entry.name, value = entry.value })
 end
 
-local function refresh()
-	if not ordered then
+local function refresh(board: Board)
+	local store = board.store
+	if not store then
 		return
 	end
 	local ok, pages = pcall(function()
-		return ordered:GetSortedAsync(false, TOP_N)
+		return store:GetSortedAsync(false, TOP_N)
 	end)
 	if not ok then
 		warn("[Leaderboard] Fetch failed:", pages)
@@ -66,35 +72,43 @@ local function refresh()
 	for _, item in pages:GetCurrentPage() do
 		local userId = tonumber(item.key)
 		if userId then
-			table.insert(fresh, { userId = userId, name = nameFor(userId), ovr = item.value })
+			table.insert(fresh, { userId = userId, name = nameFor(userId), value = item.value })
 		end
 	end
-	cache = fresh
+	board.cache = fresh
 end
 
-function LeaderboardService.init(onlineBests: () -> { Entry })
-	getOnlineBests = onlineBests
+function LeaderboardService.init(onlineProfiles: () -> { [Player]: { [string]: any } })
+	getOnlineProfiles = onlineProfiles
 	task.spawn(function()
 		while true do
-			refresh()
+			for _, board in boards do
+				refresh(board)
+			end
 			task.wait(REFRESH_SECONDS)
 		end
 	end)
 end
 
-function LeaderboardService.submit(player: Player, ovr: number)
+-- Record a new value (only ever goes up).
+function LeaderboardService.submit(boardId: string, player: Player, value: number)
+	local board = boards[boardId]
+	if not board then
+		return
+	end
 	nameCache[player.UserId] = player.Name
-	upsert(cache, { userId = player.UserId, name = player.Name, ovr = ovr })
-	if not ordered then
+	upsert(board.cache, { userId = player.UserId, name = player.Name, value = value })
+	local store = board.store
+	if not store then
 		return
 	end
 	task.spawn(function()
 		local ok, err = pcall(function()
-			ordered:UpdateAsync(tostring(player.UserId), function(old)
-				if old and old >= ovr then
-					return nil -- keep the higher score already saved
+			store:UpdateAsync(tostring(player.UserId), function(old)
+				if old and old >= value then
+					return nil -- keep the higher value already saved
 				end
-				return ovr
+				return value
 			end)
 		end)
 		if not ok then
@@ -103,16 +117,23 @@ function LeaderboardService.submit(player: Player, ovr: number)
 	end)
 end
 
-function LeaderboardService.top(): { Entry }
+function LeaderboardService.top(boardId: string): { Entry }
+	local board = boards[boardId]
+	if not board then
+		return {}
+	end
 	local merged: { Entry } = {}
-	for _, e in cache do
+	for _, e in board.cache do
 		upsert(merged, e)
 	end
-	for _, e in getOnlineBests() do
-		upsert(merged, e)
+	for player, data in getOnlineProfiles() do
+		local value = data[board.field]
+		if type(value) == "number" and value > 0 then
+			upsert(merged, { userId = player.UserId, name = player.Name, value = value })
+		end
 	end
 	table.sort(merged, function(a, b)
-		return a.ovr > b.ovr
+		return a.value > b.value
 	end)
 	local out = {}
 	for i = 1, math.min(TOP_N, #merged) do

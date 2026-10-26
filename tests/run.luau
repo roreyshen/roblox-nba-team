@@ -2,6 +2,7 @@
 local NBAData = require("../src/shared/NBAData")
 local Rating = require("../src/shared/Rating")
 local Sim = require("../src/shared/Sim")
+local Draft = require("../src/shared/Draft")
 
 local failures = 0
 local function check(cond: boolean, msg: string)
@@ -116,6 +117,59 @@ for _ = 1, 500 do
 	check(s == total, "box points sum " .. s .. " ~= " .. total)
 	check(#box == 8, "8 box lines")
 end
+
+-- Draft / duels --------------------------------------------------------------
+for _ = 1, 300 do
+	local duel = Draft.newDuel(NBAData.eras, rand)
+	check(duel.roll ~= nil and duel.turn == 1, "duel starts with a roll, side 1 first")
+	local picks = 0
+	while duel.phase == "drafting" do
+		local side = duel.turn
+		local round = duel.round
+		-- wrong side can't pick
+		local okWrong = Draft.duelPick(duel, 3 - side, 1, NBAData.eras, rand)
+		check(not okWrong, "other side cannot pick")
+		local taken = Draft.takenNames(duel.lineups)
+		local idx = Draft.bestPickIndex(duel.roll, Rating.SLOTS[round], taken, rand, 0.7)
+		check(idx ~= nil, "always something to pick")
+		-- taken players can't be picked
+		for i, p in duel.roll.players do
+			if taken[p.name] then
+				check(not Draft.duelPick(duel, side, i, NBAData.eras, rand), "taken player rejected")
+			end
+		end
+		local ok, err = Draft.duelPick(duel, side, idx :: number, NBAData.eras, rand)
+		check(ok, "valid pick failed: " .. tostring(err))
+		picks += 1
+		if duel.phase == "drafting" and duel.round == round then
+			check(duel.turn == 3 - side, "turn passes within a round")
+		end
+		if duel.phase == "drafting" and duel.round ~= round then
+			check(duel.turn == Draft.firstPicker(duel.round), "first picker alternates")
+		end
+	end
+	check(picks == 16, "16 picks per duel, got " .. picks)
+	local names = {}
+	for s = 1, 2 do
+		for i = 1, #Rating.SLOTS do
+			local p = duel.lineups[s][i]
+			check(p ~= false, "slot filled")
+			check(not names[p.name], "no player on both teams: " .. p.name)
+			names[p.name] = true
+		end
+	end
+	check(not Draft.duelPick(duel, 1, 1, NBAData.eras, rand), "no picks after done")
+end
+
+for _ = 1, 300 do
+	local roll = NBAData.eras[rand(1, #NBAData.eras)]
+	local r = Draft.rollEra(NBAData.eras, {}, rand, { exclude = roll.key, franchise = roll.franchise })
+	check(r ~= nil and r.franchise == roll.franchise and r.key ~= roll.key, "refresh = same franchise, other era")
+	local r2 = Draft.rollEra(NBAData.eras, {}, rand, { exclude = roll.key })
+	check(r2 ~= nil and r2.key ~= roll.key, "reroll = different team")
+end
+check(Draft.bestPickIndex(NBAData.byKey.Bulls_1996, Rating.SLOTS[2], {}) == 1, "best SG on '96 Bulls is Jordan")
+check(Draft.bestPickIndex(NBAData.byKey.Bulls_1996, Rating.SLOTS[2], { ["Michael Jordan"] = true }) ~= 1, "skips taken")
 
 local d = Sim.distribute(10, { 0, 0, 0 })
 check(d[1] + d[2] + d[3] == 10, "distribute zero weights")

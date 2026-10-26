@@ -12,6 +12,8 @@ Config.DEFAULT_DATA = {
 	Drafts = 0,
 	Wins = 0,
 	Losses = 0,
+	DuelWins = 0,
+	DuelLosses = 0,
 	Codes = {},
 }
 
@@ -29,5 +31,15 @@ Config.WIN_COINS = 60
 Config.WIN_COINS_PER_POINT = 2 -- bonus per point of margin
 Config.WIN_MARGIN_CAP = 30
 Config.LOSS_COINS = 15
+
+-- Live draft duels.
+Config.PICK_SECONDS = 15
+Config.INVITE_SECONDS = 20
+Config.DUEL_WIN_COINS = 150
+Config.DUEL_LOSS_COINS = 40
+Config.BOT_WIN_COINS = 60
+Config.BOT_LOSS_COINS = 15
+Config.BOT_SKILL = 0.7 -- chance the bot takes the best available player
+Config.BOT_PICK_DELAY = { 1.5, 3 } -- seconds the bot "thinks"
 
 return Config

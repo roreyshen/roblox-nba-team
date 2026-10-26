@@ -3,3 +3,5 @@ sourcemap.json
 *.rbxlx
 *.rbxl.lock
 .DS_Store
+tests/mock/generated.luau
+tests/mock/Full-API-Dump.json
